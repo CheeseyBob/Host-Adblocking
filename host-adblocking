@@ -1,0 +1,113 @@
+#!/bin/bash
+# Script to update etc/hosts with a blacklist.
+
+
+###### Usage Definitions ######
+
+usage() {
+    echo "Usage:"
+    echo "$0 <command>"
+    echo ""
+    echo "command ∈ {'backup', 'pull', 'inspect', 'apply'}"
+    echo ""
+    echo "backup: create a backup of /etc/hosts"
+    echo "pull: pull latest hosts file from github"
+    echo "inspect: open editor to inspect the hosts file before applying"
+    echo "apply: update /etc/hosts to the latest pulled hosts file (requires sudo)"
+}
+
+
+###### Function Definitions ######
+
+filterBody() {
+    declare activated='N'
+    while read line
+    do
+        if [[ "$activated" == "Y" ]]; then
+            echo $line
+        elif [[ "$line" == "# Start StevenBlack" ]]; then
+            activated='Y'
+        fi
+    done < "${1:-/dev/stdin}"
+}
+
+merge() {
+    cat my-hosts > /tmp/Adblocking/merged-hosts
+    echo "" >> /tmp/Adblocking/merged-hosts
+    echo "# My blocklist" >> /tmp/Adblocking/merged-hosts
+    echo "" >> /tmp/Adblocking/merged-hosts
+    cat my-blocklist >> /tmp/Adblocking/merged-hosts
+    echo "" >> /tmp/Adblocking/merged-hosts
+    echo "# End of my blocklist" >> /tmp/Adblocking/merged-hosts
+    echo "" >> /tmp/Adblocking/merged-hosts
+    cat /tmp/Adblocking/pulled-hosts | filterBody >> /tmp/Adblocking/merged-hosts
+}
+
+init() {
+    # Change working directory to the script location.
+    cd "$(dirname "$0")"
+
+    # Ensure the script's tempory folder exists.
+    mkdir -p /tmp/Adblocking
+}
+
+
+###### Command Definitions ######
+
+backup() {
+    mkdir -p backups
+    cat /etc/hosts > "backups/hosts_$(date +"%s")"
+}
+
+pull() {
+    curl https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts > /tmp/Adblocking/pulled-hosts
+    merge
+}
+
+inspect() {
+    # Open the file in the system-default editor
+    xdg-open /tmp/Adblocking/merged-hosts
+}
+
+apply() {
+    # Needs to be run as root.
+    cat /tmp/Adblocking/merged-hosts 2> /dev/null 1> /etc/hosts
+    if (( $? != 0 )); then
+        echo "Root permission (sudo) is needed to edit /etc/hosts"
+        exit 401
+    fi
+
+    # Flush the DNS cache so that the edits to etc/hosts apply.
+    /etc/init.d/dns-clean start
+}
+
+
+###### Script ######
+
+# Read arguments
+if (( $# != 1 )); then
+    usage; exit 404
+fi
+command=$1
+
+init
+
+# Select command
+case "${command}" in
+	"backup")
+        backup
+		;;
+	"pull")
+        pull
+		;;
+	"inspect")
+        inspect
+		;;
+	"apply")
+        apply
+		;;
+	*)
+		echo "Unrecognised command: $command"
+        usage; exit 404
+		;;
+esac
